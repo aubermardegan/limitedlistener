@@ -126,7 +126,7 @@ func samplingBandwidth() {
 	sendDataToServer(fileSize)
 	sendDataToServer(fileSize)
 
-	ticker := *time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
 
 	transferFinished := make(chan struct{})
 	totalBytesRead := 0

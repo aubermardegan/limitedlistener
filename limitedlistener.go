@@ -1,6 +1,5 @@
-// Package limitedlistener provides a TCP listener that enforces global and per-connection
-// bandwidth limits on data transfer. It uses the `golang.org/x/time/rate` package to
-// implement rate limiting and ensures that the bandwidth consumed by all connections
+// Package limitedlistener provides a TCP listener that enforces global and per-connection bandwidth limits on data transfer.
+// It uses the `golang.org/x/time/rate` package to implement rate limiting and ensures that the bandwidth consumed by all connections
 // stays within the specified limits.
 package limitedlistener
 
@@ -48,19 +47,23 @@ func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSe
 func (lc *LimitedConnection) Read(b []byte) (int, error) {
 	allowed := len(b)
 
+	ctx := context.Background()
+
 	if allowed > lc.limiter.Burst() {
 		allowed = lc.limiter.Burst()
 	}
-
-	ctx := context.Background()
-
 	err := lc.globalLimiter.WaitN(ctx, allowed)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("global: %v", err)
+	}
+
+	// Re-check the burst capacity of the rate limiter, as it may have changed since the last WaitN call.
+	if allowed > lc.limiter.Burst() {
+		allowed = lc.limiter.Burst()
 	}
 	err = lc.limiter.WaitN(ctx, allowed)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("local: %v", err)
 	}
 
 	return lc.Conn.Read(b[:allowed])
@@ -80,8 +83,8 @@ type LimitedListener struct {
 	net.Listener
 	globalLimiter         *rate.Limiter
 	perConnBandwidthLimit int
+	connections           map[*LimitedConnection]struct{}
 	sync.RWMutex
-	connections map[*LimitedConnection]struct{}
 }
 
 // NewLimitedListener creates a new LimitedListener with the specified global and per-connection bandwidth limits.
@@ -138,7 +141,6 @@ func (l *LimitedListener) SetLimits(global, perConn int) {
 	l.perConnBandwidthLimit = perConn
 
 	for connection := range l.connections {
-		connection.limiter.Reserve().Delay()
 		connection.limiter.SetLimit(rate.Limit(perConn))
 		connection.limiter.SetBurst(perConn)
 	}
