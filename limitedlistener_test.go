@@ -127,7 +127,7 @@ func TestSetLimits(t *testing.T) {
 				t.Errorf("expected: global: %d, perConn %d, but got global: %d, perConn %d", tc.wantGlobal, tc.wantPerConn, gotGlobal, gotPerConn)
 			}
 
-			for _, connection := range limitedListener.connections {
+			for connection := range limitedListener.connections {
 				if int(connection.limiter.Limit()) != tc.wantPerConn || connection.limiter.Burst() != tc.wantPerConn {
 					t.Errorf("expected: global: %d, perConn %d, but got global: %d, perConn %d", tc.wantGlobal, tc.wantPerConn, gotGlobal, gotPerConn)
 				}

@@ -21,8 +21,9 @@ var (
 // LimitedConnection wraps a net.Conn and enforces both global and per-connection bandwidth limits on the Read operation.
 type LimitedConnection struct {
 	net.Conn
-	globalLimiter *rate.Limiter
-	limiter       *rate.Limiter
+	globalLimiter  *rate.Limiter
+	limiter        *rate.Limiter
+	parentListener *LimitedListener
 }
 
 // NewLimitedConnection creates a new LimitedConnection with the specified global and per-connection bandwidth limits.
@@ -31,12 +32,14 @@ type LimitedConnection struct {
 //   - conn: The underlying net.Conn to wrap.
 //   - globalLimiter: The global rate limiter shared across all connections.
 //   - bytesPerSecond: The per-connection bandwidth limit in bytes per second.
-func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSecond int) *LimitedConnection {
+//   - parentListener: Reference to the parent listener used for cleanup when the connection closes.
+func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSecond int, parentListener *LimitedListener) *LimitedConnection {
 	limiter := rate.NewLimiter(rate.Limit(bytesPerSecond), bytesPerSecond)
 	return &LimitedConnection{
-		Conn:          conn,
-		globalLimiter: globalLimiter,
-		limiter:       limiter,
+		Conn:           conn,
+		globalLimiter:  globalLimiter,
+		limiter:        limiter,
+		parentListener: parentListener,
 	}
 }
 
@@ -63,13 +66,22 @@ func (lc *LimitedConnection) Read(b []byte) (int, error) {
 	return lc.Conn.Read(b[:allowed])
 }
 
+// Close closes the connection and notifies the listener to remove it from the connections map.
+func (lc *LimitedConnection) Close() error {
+	err := lc.Conn.Close()
+	if lc.parentListener != nil {
+		lc.parentListener.removeConnection(lc)
+	}
+	return err
+}
+
 // LimitedListener wraps a net.Listener and enforces global and per-connection bandwidth limits on all accepted connections.
 type LimitedListener struct {
 	net.Listener
 	globalLimiter         *rate.Limiter
 	perConnBandwidthLimit int
 	sync.RWMutex
-	connections []*LimitedConnection
+	connections map[*LimitedConnection]struct{}
 }
 
 // NewLimitedListener creates a new LimitedListener with the specified global and per-connection bandwidth limits.
@@ -93,6 +105,7 @@ func NewLimitedListener(listener net.Listener, globalLimit, perConnLimit int) (*
 		Listener:              listener,
 		globalLimiter:         globalLimiter,
 		perConnBandwidthLimit: perConnLimit,
+		connections:           make(map[*LimitedConnection]struct{}),
 	}, nil
 }
 
@@ -106,8 +119,8 @@ func (l *LimitedListener) Accept() (net.Conn, error) {
 	l.RLock()
 	defer l.RUnlock()
 
-	limitedConnection := NewLimitedConnection(conn, l.globalLimiter, l.perConnBandwidthLimit)
-	l.connections = append(l.connections, limitedConnection)
+	limitedConnection := NewLimitedConnection(conn, l.globalLimiter, l.perConnBandwidthLimit, l)
+	l.connections[limitedConnection] = struct{}{}
 
 	return limitedConnection, nil
 }
@@ -124,8 +137,17 @@ func (l *LimitedListener) SetLimits(global, perConn int) {
 	l.globalLimiter.SetBurst(global)
 	l.perConnBandwidthLimit = perConn
 
-	for _, connection := range l.connections {
+	for connection := range l.connections {
+		connection.limiter.Reserve().Delay()
 		connection.limiter.SetLimit(rate.Limit(perConn))
 		connection.limiter.SetBurst(perConn)
 	}
+}
+
+// removeConnection removes a connection from the connections map when it is closed.
+func (l *LimitedListener) removeConnection(lc *LimitedConnection) {
+	l.Lock()
+	defer l.Unlock()
+
+	delete(l.connections, lc)
 }

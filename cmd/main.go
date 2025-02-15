@@ -112,9 +112,9 @@ func logProgress(elapsed float64, totalBytesRead, targetRate int) {
 }
 
 func samplingBandwidth() {
-	globalRate := 1024          // 1 KB/s
-	perConnRate := 1024         // 1 KB/s
-	fileSize := 1 * 1024 * 1024 // 10 MB
+	globalRate := 1024           // 1 KB/s
+	perConnRate := 1024          // 1 KB/s
+	fileSize := 10 * 1024 * 1024 // 10 MB
 
 	server := NewServer()
 	go func() {
@@ -152,9 +152,9 @@ func samplingBandwidth() {
 }
 
 func changingLimitsOnRuntime() {
-	globalRate := 1024          // 1 KB/s
-	perConnRate := 1024         // 1 KB/s
-	fileSize := 1 * 1024 * 1024 // 10 MB
+	globalRate := 1024           // 1 KB/s
+	perConnRate := 1024          // 1 KB/s
+	fileSize := 10 * 1024 * 1024 // 10 MB
 
 	server := NewServer()
 	go func() {
