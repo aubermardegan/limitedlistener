@@ -1,3 +1,7 @@
+// Package limitedlistener provides a TCP listener that enforces global and per-connection
+// bandwidth limits on data transfer. It uses the `golang.org/x/time/rate` package to
+// implement rate limiting and ensures that the bandwidth consumed by all connections
+// stays within the specified limits.
 package limitedlistener
 
 import (
@@ -14,12 +18,19 @@ var (
 	ErrInvalidLimits   = fmt.Errorf("global bandwidth limit must be equal or higher than per conn bandwidth limit")
 )
 
+// LimitedConnection wraps a net.Conn and enforces both global and per-connection bandwidth limits on the Read operation.
 type LimitedConnection struct {
 	net.Conn
 	globalLimiter *rate.Limiter
 	limiter       *rate.Limiter
 }
 
+// NewLimitedConnection creates a new LimitedConnection with the specified global and per-connection bandwidth limits.
+//
+// Parameters:
+//   - conn: The underlying net.Conn to wrap.
+//   - globalLimiter: The global rate limiter shared across all connections.
+//   - bytesPerSecond: The per-connection bandwidth limit in bytes per second.
 func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSecond int) *LimitedConnection {
 	limiter := rate.NewLimiter(rate.Limit(bytesPerSecond), bytesPerSecond)
 	return &LimitedConnection{
@@ -29,6 +40,8 @@ func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSe
 	}
 }
 
+// Read reads data from the connection while respecting the global and per-connection bandwidth limits.
+// It ensures that the data transfer rate does not exceed the specified limits.
 func (lc *LimitedConnection) Read(b []byte) (int, error) {
 	allowed := len(b)
 
@@ -50,6 +63,7 @@ func (lc *LimitedConnection) Read(b []byte) (int, error) {
 	return lc.Conn.Read(b[:allowed])
 }
 
+// LimitedListener wraps a net.Listener and enforces global and per-connection bandwidth limits on all accepted connections.
 type LimitedListener struct {
 	net.Listener
 	globalLimiter         *rate.Limiter
@@ -58,6 +72,12 @@ type LimitedListener struct {
 	connections []*LimitedConnection
 }
 
+// NewLimitedListener creates a new LimitedListener with the specified global and per-connection bandwidth limits.
+//
+// Parameters:
+//   - listener: The underlying net.Listener to wrap.
+//   - globalLimit: The global bandwidth limit in bytes per second.
+//   - perConnLimit: The per-connection bandwidth limit in bytes per second.
 func NewLimitedListener(listener net.Listener, globalLimit, perConnLimit int) (*LimitedListener, error) {
 
 	if globalLimit <= 0 || perConnLimit <= 0 {
@@ -76,6 +96,7 @@ func NewLimitedListener(listener net.Listener, globalLimit, perConnLimit int) (*
 	}, nil
 }
 
+// Accept accepts incoming connections and wraps them with a LimitedConnection to enforce bandwidth limits.
 func (l *LimitedListener) Accept() (net.Conn, error) {
 	conn, err := l.Listener.Accept()
 	if err != nil {
@@ -87,9 +108,11 @@ func (l *LimitedListener) Accept() (net.Conn, error) {
 
 	limitedConnection := NewLimitedConnection(conn, l.globalLimiter, l.perConnBandwidthLimit)
 	l.connections = append(l.connections, limitedConnection)
+
 	return limitedConnection, nil
 }
 
+// SetLimits updates the global and per-connection bandwidth limits for the listener and all active connections.
 func (l *LimitedListener) SetLimits(global, perConn int) {
 	if global <= 0 || perConn <= 0 || global < perConn {
 		return

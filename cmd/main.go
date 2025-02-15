@@ -10,16 +10,20 @@ import (
 	"github.com/aubermardegan/limitedlistener"
 )
 
+type ConnInfo struct {
+	Addr      string
+	bytesRead int
+}
 type Server struct {
-	ln          *limitedlistener.LimitedListener
-	bytesReadCh chan int
-	quit        chan struct{}
+	ln         *limitedlistener.LimitedListener
+	connInfoCh chan ConnInfo
+	quit       chan struct{}
 }
 
 func NewServer() *Server {
 	return &Server{
-		bytesReadCh: make(chan int),
-		quit:        make(chan struct{}),
+		connInfoCh: make(chan ConnInfo),
+		quit:       make(chan struct{}),
 	}
 }
 
@@ -41,7 +45,7 @@ func (s *Server) Start(global, perConn int) error {
 	go s.acceptLoop()
 
 	<-s.quit
-	close(s.bytesReadCh)
+	close(s.connInfoCh)
 	return nil
 }
 
@@ -53,7 +57,7 @@ func (s *Server) acceptLoop() {
 			continue
 		}
 
-		fmt.Println("New Connection")
+		fmt.Printf("\nNew Connection -> %s", conn.RemoteAddr().String())
 
 		go s.readLoop(conn)
 	}
@@ -73,19 +77,20 @@ func (s *Server) readLoop(conn net.Conn) {
 			break
 		}
 
-		s.bytesReadCh <- n
+		s.connInfoCh <- ConnInfo{
+			Addr:      conn.RemoteAddr().String(),
+			bytesRead: n,
+		}
 	}
 }
 
 func sendDataToServer(fileSize int) {
-	//Connect to the server.
 	conn, err := net.Dial("tcp", ":8080")
 	if err != nil {
 		log.Fatalf("Failed to dial: %v", err)
 	}
 	defer conn.Close()
 
-	//Send the data
 	data := make([]byte, fileSize)
 	_, err = conn.Write(data)
 	if err != nil {
@@ -106,17 +111,19 @@ func logProgress(elapsed float64, totalBytesRead, targetRate int) {
 	}
 }
 
-func samplingBandWidth() {
-	targetRate := 1024          // 1 KB/s
+func samplingBandwidth() {
+	globalRate := 1024          // 1 KB/s
+	perConnRate := 1024         // 1 KB/s
 	fileSize := 1 * 1024 * 1024 // 10 MB
 
 	server := NewServer()
 	go func() {
-		log.Fatal(server.Start(targetRate, targetRate))
+		log.Fatal(server.Start(globalRate, perConnRate))
 	}()
 	time.Sleep(1 * time.Second)
 
 	startTime := time.Now()
+	sendDataToServer(fileSize)
 	sendDataToServer(fileSize)
 
 	ticker := *time.NewTicker(30 * time.Second)
@@ -126,31 +133,32 @@ func samplingBandWidth() {
 
 	for {
 		select {
-		case bytesRead := <-server.bytesReadCh:
-			totalBytesRead += bytesRead
+		case connInfo := <-server.connInfoCh:
+			totalBytesRead += connInfo.bytesRead
 			if totalBytesRead == fileSize {
 				go func() { transferFinished <- struct{}{} }()
 			}
-			fmt.Printf("\n%s -> Read %d bytes", time.Now().Format(time.DateTime), bytesRead)
+			fmt.Printf("\n%s -> Conn %s read %d bytes", time.Now().Format(time.DateTime), connInfo.Addr, connInfo.bytesRead)
 
 		case <-ticker.C:
-			logProgress(time.Since(startTime).Seconds(), totalBytesRead, targetRate)
+			logProgress(time.Since(startTime).Seconds(), totalBytesRead, globalRate)
 
 		case <-transferFinished:
 			fmt.Println("Finished!")
-			logProgress(time.Since(startTime).Seconds(), totalBytesRead, targetRate)
+			logProgress(time.Since(startTime).Seconds(), totalBytesRead, globalRate)
 			return
 		}
 	}
 }
 
-func changingLimitsOnRunTime() {
-	targetRate := 1024          // 1 KB/s
+func changingLimitsOnRuntime() {
+	globalRate := 1024          // 1 KB/s
+	perConnRate := 1024         // 1 KB/s
 	fileSize := 1 * 1024 * 1024 // 10 MB
 
 	server := NewServer()
 	go func() {
-		log.Fatal(server.Start(targetRate, targetRate))
+		log.Fatal(server.Start(globalRate, perConnRate))
 	}()
 
 	time.Sleep(1 * time.Second)
@@ -165,21 +173,23 @@ func changingLimitsOnRunTime() {
 
 	for {
 		select {
-		case bytesRead := <-server.bytesReadCh:
-			totalBytesRead += bytesRead
+		case connInfo := <-server.connInfoCh:
+			totalBytesRead += connInfo.bytesRead
 			if totalBytesRead == fileSize {
 				go func() { transferFinished <- struct{}{} }()
 			}
-			fmt.Printf("\n%s -> Read %d bytes", time.Now().Format(time.DateTime), bytesRead)
+			fmt.Printf("\n%s -> Conn %s read %d bytes", time.Now().Format(time.DateTime), connInfo.Addr, connInfo.bytesRead)
 
 		case <-tickerIncrease.C:
-			targetRate = targetRate * 2
-			server.ln.SetLimits(targetRate, targetRate)
+			globalRate = globalRate * 2
+			perConnRate = perConnRate * 2
+			server.ln.SetLimits(globalRate, perConnRate)
 			fmt.Printf("\n%s -> Doubling the Limit", time.Now().Format(time.DateTime))
 
 		case <-tickerReduce.C:
-			targetRate = targetRate / 2
-			server.ln.SetLimits(targetRate, targetRate)
+			globalRate = globalRate / 2
+			perConnRate = perConnRate / 2
+			server.ln.SetLimits(globalRate, perConnRate)
 			fmt.Printf("\n%s -> Halving the Limit", time.Now().Format(time.DateTime))
 
 		case <-transferFinished:
@@ -190,6 +200,6 @@ func changingLimitsOnRunTime() {
 }
 
 func main() {
-	samplingBandWidth()
-	//changingLimitsOnRunTime()
+	samplingBandwidth()
+	//changingLimitsOnRuntime()
 }

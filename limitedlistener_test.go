@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestIfSatisfiesLimitListenerInterface verifies that the LimitedListener type implements the LimitListener interface.
 func TestIfSatisfiesLimitListenerInterface(t *testing.T) {
 	type LimitListener interface {
 		net.Listener
@@ -15,6 +16,9 @@ func TestIfSatisfiesLimitListenerInterface(t *testing.T) {
 	var _ LimitListener = (*LimitedListener)(nil)
 }
 
+// TestNewLimitedListenerValidationErrors tests the validation logic in the NewLimitedListener function.
+// It ensures that the function returns appropriate errors for invalid inputs, such as zero or negative limits,
+// and when the global limit is less than the per-connection limit.
 func TestNewLimitedListenerValidationErros(t *testing.T) {
 	testCases := []struct {
 		test    string
@@ -72,6 +76,9 @@ func TestNewLimitedListenerValidationErros(t *testing.T) {
 	}
 }
 
+// TestSetLimits tests the SetLimits method of the LimitedListener type.
+// It verifies that the method correctly updates the global and per-connection bandwidth limits for the listener and all active connections.
+// It also ensures that invalid inputs do not change the existing limits.
 func TestSetLimits(t *testing.T) {
 
 	testCases := []struct {
