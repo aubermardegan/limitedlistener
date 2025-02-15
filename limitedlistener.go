@@ -16,32 +16,46 @@ var (
 
 type LimitedConnection struct {
 	net.Conn
-	limiter *rate.Limiter
+	globalLimiter *rate.Limiter
+	limiter       *rate.Limiter
 }
 
-func NewLimitedConnection(conn net.Conn, bytesPerSecond int) *LimitedConnection {
+func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSecond int) *LimitedConnection {
 	limiter := rate.NewLimiter(rate.Limit(bytesPerSecond), bytesPerSecond)
 	return &LimitedConnection{
-		Conn:    conn,
-		limiter: limiter,
+		Conn:          conn,
+		globalLimiter: globalLimiter,
+		limiter:       limiter,
 	}
 }
 
-func (lc *LimitedConnection) Write(b []byte) (int, error) {
+func (lc *LimitedConnection) Read(b []byte) (int, error) {
+	allowed := len(b)
 
-	err := lc.limiter.WaitN(context.Background(), len(b))
+	if allowed > lc.limiter.Burst() {
+		allowed = lc.limiter.Burst()
+	}
+
+	ctx := context.Background()
+
+	err := lc.globalLimiter.WaitN(ctx, allowed)
+	if err != nil {
+		return 0, err
+	}
+	err = lc.limiter.WaitN(ctx, allowed)
 	if err != nil {
 		return 0, err
 	}
 
-	return lc.Conn.Write(b)
+	return lc.Conn.Read(b[:allowed])
 }
 
 type LimitedListener struct {
 	net.Listener
-	globalBandwidthLimit  int
+	globalLimiter         *rate.Limiter
 	perConnBandwidthLimit int
 	sync.RWMutex
+	connections []*LimitedConnection
 }
 
 func NewLimitedListener(listener net.Listener, globalLimit, perConnLimit int) (*LimitedListener, error) {
@@ -53,9 +67,11 @@ func NewLimitedListener(listener net.Listener, globalLimit, perConnLimit int) (*
 		return nil, ErrInvalidLimits
 	}
 
+	globalLimiter := rate.NewLimiter(rate.Limit(globalLimit), globalLimit)
+
 	return &LimitedListener{
 		Listener:              listener,
-		globalBandwidthLimit:  globalLimit,
+		globalLimiter:         globalLimiter,
 		perConnBandwidthLimit: perConnLimit,
 	}, nil
 }
@@ -69,7 +85,8 @@ func (l *LimitedListener) Accept() (net.Conn, error) {
 	l.RLock()
 	defer l.RUnlock()
 
-	limitedConnection := NewLimitedConnection(conn, l.perConnBandwidthLimit)
+	limitedConnection := NewLimitedConnection(conn, l.globalLimiter, l.perConnBandwidthLimit)
+	l.connections = append(l.connections, limitedConnection)
 	return limitedConnection, nil
 }
 
@@ -78,7 +95,14 @@ func (l *LimitedListener) SetLimits(global, perConn int) {
 		return
 	}
 	l.Lock()
-	l.globalBandwidthLimit = global
+	defer l.Unlock()
+
+	l.globalLimiter.SetLimit(rate.Limit(global))
+	l.globalLimiter.SetBurst(global)
 	l.perConnBandwidthLimit = perConn
-	l.Unlock()
+
+	for _, connection := range l.connections {
+		connection.limiter.SetLimit(rate.Limit(perConn))
+		connection.limiter.SetBurst(perConn)
+	}
 }
