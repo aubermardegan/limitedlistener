@@ -1,6 +1,8 @@
 # `limitedlistener` Package
 
-The limitedlistener package provides a TCP listener that enforces **global\_** and **per-connection** **bandwidth limits** on data transfer. It uses the `golang.org/x/time/rate` package to implement rate limiting, ensuring that the bandwidth consumed by all connections stays within the specified limits.
+[![Go Reference](https://pkg.go.dev/badge/github.com/aubermardegan/limitedlistener.svg)](https://pkg.go.dev/github.com/aubermardegan/limitedlistener)
+
+The limitedlistener package provides a TCP listener that enforces **global** and **per-connection** **bandwidth limits** on data transfer. It uses the `golang.org/x/time/rate` package to implement rate limiting, ensuring that the bandwidth consumed by all connections stays within the specified limits.
 
 This package is useful for applications that need to control the rate of data transfer across multiple connections, such as file servers, API gateways, or any network service where bandwidth throttling is required.
 

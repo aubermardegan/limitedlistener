@@ -2,8 +2,11 @@ package limitedlistener
 
 import (
 	"errors"
+	"io"
 	"net"
+	"sync"
 	"testing"
+	"time"
 )
 
 // TestIfSatisfiesLimitListenerInterface verifies that the LimitedListener type implements the LimitListener interface.
@@ -135,5 +138,64 @@ func TestSetLimits(t *testing.T) {
 
 			limitedListener.RUnlock()
 		})
+	}
+}
+
+// TestConnectionCleaning tests the behavior of the LimitedListener to ensure that connections are properly registered and cleaned up.
+func TestConnectionCleaning(t *testing.T) {
+
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		t.Fatalf("didn't expect error but got one: %v", err)
+	}
+	defer listener.Close()
+
+	limitedlistener, err := NewLimitedListener(listener, 100, 50)
+	if err != nil {
+		t.Fatalf("didn't expect error but got one: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		conn, err := limitedlistener.Accept()
+		if err != nil {
+			t.Errorf("accept error: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 1024)
+		_, err = conn.Read(buf)
+		if err != nil && err != io.EOF {
+			t.Errorf("read error: %v", err)
+		}
+	}(&wg)
+
+	conn, err := net.Dial("tcp", ":8080")
+	if err != nil {
+		t.Fatalf("didn't expect error but got one: %v", err)
+	}
+	defer conn.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	if len(limitedlistener.connections) != 1 {
+		t.Errorf("expected 1 connection but got %d", len(limitedlistener.connections))
+	}
+
+	_, err = conn.Write([]byte("test"))
+	if err != nil {
+		t.Errorf("write error: %v", err)
+	}
+
+	wg.Wait()
+
+	time.Sleep(100 * time.Millisecond)
+
+	if len(limitedlistener.connections) != 0 {
+		t.Errorf("expected 0 connections but got %d", len(limitedlistener.connections))
 	}
 }
