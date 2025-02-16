@@ -25,14 +25,14 @@ type LimitedConnection struct {
 	parentListener *LimitedListener
 }
 
-// NewLimitedConnection creates a new LimitedConnection with the specified global and per-connection bandwidth limits.
+// newLimitedConnection creates a new LimitedConnection with the specified global and per-connection bandwidth limits.
 //
 // Parameters:
 //   - conn: The underlying net.Conn to wrap.
 //   - globalLimiter: The global rate limiter shared across all connections.
 //   - bytesPerSecond: The per-connection bandwidth limit in bytes per second.
 //   - parentListener: Reference to the parent listener used for cleanup when the connection closes.
-func NewLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSecond int, parentListener *LimitedListener) *LimitedConnection {
+func newLimitedConnection(conn net.Conn, globalLimiter *rate.Limiter, bytesPerSecond int, parentListener *LimitedListener) *LimitedConnection {
 	limiter := rate.NewLimiter(rate.Limit(bytesPerSecond), bytesPerSecond)
 	return &LimitedConnection{
 		Conn:           conn,
@@ -122,7 +122,7 @@ func (l *LimitedListener) Accept() (net.Conn, error) {
 	l.RLock()
 	defer l.RUnlock()
 
-	limitedConnection := NewLimitedConnection(conn, l.globalLimiter, l.perConnBandwidthLimit, l)
+	limitedConnection := newLimitedConnection(conn, l.globalLimiter, l.perConnBandwidthLimit, l)
 	l.connections[limitedConnection] = struct{}{}
 
 	return limitedConnection, nil

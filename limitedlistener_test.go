@@ -2,6 +2,7 @@ package limitedlistener
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -144,11 +145,13 @@ func TestSetLimits(t *testing.T) {
 // TestConnectionCleaning tests the behavior of the LimitedListener to ensure that connections are properly registered and cleaned up.
 func TestConnectionCleaning(t *testing.T) {
 
-	listener, err := net.Listen("tcp", ":8080")
+	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("didn't expect error but got one: %v", err)
 	}
 	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
 
 	limitedlistener, err := NewLimitedListener(listener, 100, 50)
 	if err != nil {
@@ -174,7 +177,7 @@ func TestConnectionCleaning(t *testing.T) {
 		}
 	}(&wg)
 
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		t.Fatalf("didn't expect error but got one: %v", err)
 	}
